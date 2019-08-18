@@ -1,31 +1,34 @@
 package com.tools.areaspider.domain;
 
-import javax.persistence.Entity;
-import javax.persistence.Id;
-import javax.persistence.Transient;
 import java.util.ArrayList;
 import java.util.List;
 
 
 /*区域实体
 * */
-@Entity
+
 public class Area {
 
-    @Id
+
     private int id;
     private int pid;
     private String name;
     private String code;
 
-    @Transient
     private List<Area> children;
 
-    public Area(int id,int pid,String name,String code){
+    private String url;
+
+    public Area(){
+        this.children=new ArrayList<>();
+    }
+
+    public Area(int id,int pid,String name,String code,String url){
         this.id=id;
         this.pid=pid;
         this.name=name;
         this.code=code;
+        this.url=url;
 
         this.children=new ArrayList<>();
     }
@@ -68,5 +71,13 @@ public class Area {
 
     public void setChildren(List<Area> children) {
         this.children = children;
+    }
+
+    public String getUrl() {
+        return url;
+    }
+
+    public void setUrl(String url) {
+        this.url = url;
     }
 }
