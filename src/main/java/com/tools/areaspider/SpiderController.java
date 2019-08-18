@@ -9,22 +9,81 @@ import org.jsoup.select.Elements;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.adapter.AbstractReactiveWebInitializer;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestController
 public class SpiderController {
 
+    // request html page retry times when request fail
+    private static final int RETRY_TIMES = 5;
+
+
+    /*
+     * area spider startup
+     * */
     @RequestMapping("/")
     public ResponseEntity<?> runSpider() throws Exception {
-        List<Area> areas = getCity();
+        List<Area> areas = getAreaData();
+
         return ResponseEntity.ok(areas);
     }
 
+    public List<Area> getAreaData() throws Exception {
+        String provinceUrl = getLatestStatsUrl();
+        List<Area> provinces = provinceParser(provinceUrl);
+
+        provinces.parallelStream()
+                .forEach(x -> getChildren(x, "citytr"));
+
+        for (int i = 0; i < 5; i++) {
+            provinces.get(i).getChildren()
+                    .parallelStream()
+                    .forEach(x -> getChildren(x, "countytr"));
+        }
+
+        return provinces;
+    }
+
+    private void getChildren(Area parent, String levelClassName) {
+        try {
+            List<Area> children = pageParser(parent.getUrl(), levelClassName);
+            parent.setChildren(children);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private List<Area> provinceParser(String provinceUrl) {
+        Document doc = getHtml(provinceUrl, RETRY_TIMES);
+        if (doc == null) {
+            return null;
+        }
+
+
+        Elements elements = doc.getElementsByClass("provincetr");
+
+        List<Area> provinces = new ArrayList<>();
+        for (Element element : elements) {
+            for (Element a : element.getElementsByTag("a")) {
+                String url = a.absUrl("href");
+                Area province = new Area();
+                province.setName(a.text().trim());
+                province.setUrl(url);
+
+                provinces.add(province);
+            }
+        }
+
+        return provinces;
+    }
+
     public static List<Area> getCity() throws Exception {
-        List<Area> province = getProvince();
+        List<Area> province = new ArrayList<>();// getProvince();
 
         List<Thread> threads = new ArrayList<>();
         for (Area area : province) {
@@ -98,8 +157,7 @@ public class SpiderController {
                     area.setCode(code);
                     area.setName(name);
 
-                    String childUrl = url.replaceAll("(\\d+|\\w+)\\.html", link.attr("href"));
-                    area.setUrl(childUrl);
+                    area.setUrl(link.absUrl("href"));
                     list.add(area);
                 } catch (Exception e) {
                     System.out.println(url);
@@ -127,17 +185,8 @@ public class SpiderController {
 
     private static Document getHtml(String url, int retry) {
         Document doc = null;
-
         try {
-            /*_trs_uv=jzcmw6vf_6_bkwx; __utmz=207252561.1565870812.1.1.utmcsr=(direct)|utmccn=(direct)|utmcmd=(none); AD_RS_COOKIE=20082855; __utma=207252561.2068155420.1565870812.1565870812.1566132421.2; __utmc=207252561; __utmt=1; __utmb=207252561.1.10.1566132421; wzws_cid=303c41b64c98b347518cc7a1a380d9867ee6cc7313f7a47d16f49702e0d246ff31ca5ccf3aefed47ffe234f54fa1121acfe63e10f92eb887a542a81a33e1b404; _trs_ua_s_1=jzgytnre_6_kuaj
-             */
-            String cookie = "_trs_uv=jzcmw6vf_6_bkwx; __utmz=207252561.1565870812.1.1.utmcsr=(direct)|utmccn=(direct)|utmcmd=(none); AD_RS_COOKIE=20082855; __utma=207252561.2068155420.1565870812.1565870812.1566132421.2; __utmc=207252561; __utmt=1; __utmb=207252561.1.10.1566132421; wzws_cid=303c41b64c98b347518cc7a1a380d9867ee6cc7313f7a47d16f49702e0d246ff31ca5ccf3aefed47ffe234f54fa1121acfe63e10f92eb887a542a81a33e1b404; _trs_ua_s_1=jzgytnre_6_kuaj";
-            Map<String, String> cookies = new HashMap<>();
-            for (String item : cookie.split(";")) {
-                cookies.put(item.split("=")[0], item.split("=")[1]);
-            }
-
-            doc = Jsoup.connect(url).cookies(cookies).get();
+            doc = Jsoup.connect(url).get();
             return doc;
         } catch (Exception e) {
             e.printStackTrace();
@@ -147,34 +196,6 @@ public class SpiderController {
         }
 
         return doc;
-    }
-
-    // 省份数据
-    public static List<Area> getProvince() {
-        String provinceUrl = getLatestStatsUrl();
-        Document doc = null;
-        try {
-            doc = getHtml(provinceUrl, 3);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-
-        Elements elements = doc.getElementsByClass("provincetr");
-
-        List<Area> province = new ArrayList<>();
-        for (Element element : elements) {
-            for (Element a : element.getElementsByTag("a")) {
-                String url = provinceUrl.replaceAll("\\w+\\.html", a.attr("href"));
-
-                Area area = new Area();
-                area.setName(a.text().trim());
-                area.setUrl(url);
-
-                province.add(area);
-            }
-        }
-
-        return province;
     }
 
     // 最新一年统计 数据
