@@ -10,10 +10,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Base64;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestController
@@ -21,7 +23,13 @@ public class SpiderController {
 
     // request html page retry times when request fail
     private static final int RETRY_TIMES = 5;
-
+    private static final List<String> classList = new ArrayList<String>() {{
+        add("provincetr");
+        add("citytr");
+        add("countytr");
+        add("towntr");
+        add("villagetr");
+    }};
 
     /*
      * area spider startup
@@ -33,18 +41,14 @@ public class SpiderController {
         return ResponseEntity.ok(areas);
     }
 
-    public List<Area> getAreaData() throws Exception {
+    public List<Area> getAreaData() {
         String provinceUrl = getLatestStatsUrl();
-        List<Area> provinces = provinceParser(provinceUrl);
+        List<Area> provinces = provinceParser(provinceUrl, classList.get(0));
 
-        provinces.parallelStream()
-                .forEach(x -> getChildren(x, "citytr"));
 
-        for (int i = 0; i < 5; i++) {
-            provinces.get(i).getChildren()
-                    .parallelStream()
-                    .forEach(x -> getChildren(x, "countytr"));
-        }
+        //provinces.subList(provinces.size() - 2, provinces.size() - 1)
+        //.forEach(x -> getChildren(x, classList.get(1)));
+        //getChildren(provinces.get(0), classList.get(1));
 
         return provinces;
     }
@@ -52,20 +56,27 @@ public class SpiderController {
     private void getChildren(Area parent, String levelClassName) {
         try {
             List<Area> children = pageParser(parent.getUrl(), levelClassName);
+            for (Area child : children) {
+                if (child.getUrl() != null) {
+                    String childClassName = classList.get(classList.indexOf(levelClassName) + 1);
+                    getChildren(child, childClassName);
+                }
+            }
+
             parent.setChildren(children);
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    private List<Area> provinceParser(String provinceUrl) {
+    private List<Area> provinceParser(String provinceUrl, String className) {
         Document doc = getHtml(provinceUrl, RETRY_TIMES);
         if (doc == null) {
             return null;
         }
 
 
-        Elements elements = doc.getElementsByClass("provincetr");
+        Elements elements = doc.getElementsByClass(className);
 
         List<Area> provinces = new ArrayList<>();
         for (Element element : elements) {
@@ -184,9 +195,29 @@ public class SpiderController {
     }
 
     private static Document getHtml(String url, int retry) {
+
+        String base64fileName = Base64.getEncoder().encodeToString(url.getBytes());
+        String root = System.getProperty("user.dir");
+        String fullName = root + "\\" + base64fileName + ".html";
+
+        if (Files.exists(Paths.get(fullName))) {
+            try {
+                File file = new File(fullName);
+                return Jsoup.parse(file, "utf-8");
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+
         Document doc = null;
         try {
-            doc = Jsoup.connect(url).get();
+            doc = Jsoup.connect(url).timeout(5000).get();
+
+            // 保存到本地
+            String charsetName = doc.charset().name();
+            byte[] data = doc.outerHtml().getBytes(charsetName);
+            Files.write(Paths.get(fullName), data);
+
             return doc;
         } catch (Exception e) {
             e.printStackTrace();
