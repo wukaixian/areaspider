@@ -10,8 +10,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -35,7 +36,9 @@ public class SpiderController {
      * area spider startup
      * */
     @RequestMapping("/")
-    public ResponseEntity<?> runSpider() throws Exception {
+    public ResponseEntity<?> runSpider() {
+        CharsetManager.init();
+
         List<Area> areas = getAreaData();
 
         return ResponseEntity.ok(areas);
@@ -45,21 +48,21 @@ public class SpiderController {
         String provinceUrl = getLatestStatsUrl();
         List<Area> provinces = provinceParser(provinceUrl, classList.get(0));
 
-
-        //provinces.subList(provinces.size() - 2, provinces.size() - 1)
-        //.forEach(x -> getChildren(x, classList.get(1)));
-        //getChildren(provinces.get(0), classList.get(1));
+        // 并行各个省爬数据
+        provinces.parallelStream()
+                .forEach(p -> detectChildren(p, classList.get(1)));
 
         return provinces;
     }
 
-    private void getChildren(Area parent, String levelClassName) {
+    // 下一级地区数据加载
+    private void detectChildren(Area parent, String levelClassName) {
         try {
             List<Area> children = pageParser(parent.getUrl(), levelClassName);
             for (Area child : children) {
                 if (child.getUrl() != null) {
                     String childClassName = classList.get(classList.indexOf(levelClassName) + 1);
-                    getChildren(child, childClassName);
+                    detectChildren(child, childClassName);
                 }
             }
 
@@ -69,6 +72,7 @@ public class SpiderController {
         }
     }
 
+    // 省份解析
     private List<Area> provinceParser(String provinceUrl, String className) {
         Document doc = getHtml(provinceUrl, RETRY_TIMES);
         if (doc == null) {
@@ -93,58 +97,7 @@ public class SpiderController {
         return provinces;
     }
 
-    public static List<Area> getCity() throws Exception {
-        List<Area> province = new ArrayList<>();// getProvince();
-
-        List<Thread> threads = new ArrayList<>();
-        for (Area area : province) {
-            Area local = area;
-            Thread t = new Thread(() -> {
-                List<Area> children = null;
-                try {
-                    children = getCitys(local);
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-                local.setChildren(children);
-            });
-
-            t.start();
-            threads.add(t);
-        }
-
-        for (Thread thread : threads) {
-            thread.join();
-        }
-
-        return province;
-    }
-
-    public static List<Area> getCitys(Area area) throws Exception {
-        // city
-        List<Area> cityChildren = pageParser(area.getUrl(), "citytr");
-
-        for (Area child : cityChildren) {
-
-            // county
-            List<Area> countyChildren = pageParser(child.getUrl(), "countytr");
-            for (Area countyChild : countyChildren) {
-                // town
-                List<Area> townChildren = pageParser(countyChild.getUrl(), "towntr");
-
-                for (Area townChild : townChildren) {
-                    // village
-                    List<Area> villageChildren = pageParser(townChild.getUrl(), "villagetr");
-                    townChild.setChildren(villageChildren);
-                }
-                countyChild.setChildren(townChildren);
-            }
-            child.setChildren(countyChildren);
-        }
-
-        return cityChildren;
-    }
-
+    // 页面解析器
     private static List<Area> pageParser(String url, String className) throws Exception {
         Document doc = null;
         try {
@@ -194,29 +147,43 @@ public class SpiderController {
         return list;
     }
 
+    // load page html
     private static Document getHtml(String url, int retry) {
-
         String base64fileName = Base64.getEncoder().encodeToString(url.getBytes());
-        String root = System.getProperty("user.dir");
-        String fullName = root + "\\" + base64fileName + ".html";
-
-        if (Files.exists(Paths.get(fullName))) {
+        String root = System.getProperty("user.dir") + "\\cache";
+        if (!Files.exists(Paths.get(root))) {
             try {
-                File file = new File(fullName);
-                return Jsoup.parse(file, "utf-8");
+                Files.createDirectories(Paths.get(root));
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+        Path fullName = Paths.get(root, base64fileName + ".html");
+
+        Document doc = null;
+        // 从本地缓存读html
+        if (Files.exists(fullName)) {
+            try {
+                doc = Jsoup.parse(fullName.toFile(), CharsetManager.getCharset(base64fileName));
+                doc.setBaseUri(url);
+
+                return doc;
             } catch (Exception e) {
                 e.printStackTrace();
             }
         }
 
-        Document doc = null;
         try {
             doc = Jsoup.connect(url).timeout(5000).get();
-
+            if (doc.title().equals("访问验证")) {
+                return null;
+            }
             // 保存到本地
             String charsetName = doc.charset().name();
+            CharsetManager.saveCharset(base64fileName, charsetName);
+
             byte[] data = doc.outerHtml().getBytes(charsetName);
-            Files.write(Paths.get(fullName), data);
+            Files.write(fullName, data);
 
             return doc;
         } catch (Exception e) {

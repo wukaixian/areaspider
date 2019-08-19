@@ -5,6 +5,8 @@ import java.util.regex.Pattern;
 
 public final class RegexUtils {
 
+    /*extract number for string
+    * */
     public static Integer extractNumber(String input){
         Pattern regex = Pattern.compile("\\d+");
         Matcher matcher = regex.matcher(input);
