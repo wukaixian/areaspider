@@ -68,14 +68,14 @@ public class ProxyIpAddr {
     }
 
     private void decrementWeight(int seed) {
-        if (this.weight - seed < 0)
+        if (this.weight - seed <= 0 && seed > 1) {
             this.weight = 0;
-
-        this.weight--;
-
-        // reset init state
-        if (seed == 1 && weight == 0) {
-            this.weight = DEFAULT_WEIGHT;
+        } else {
+            this.weight--;
+            // reset init state
+            if (seed == 1 && weight == 0) {
+                this.weight = DEFAULT_WEIGHT;
+            }
         }
     }
 }

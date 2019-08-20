@@ -3,6 +3,7 @@ package com.tools.areaspider;
 import com.tools.areaspider.domain.Area;
 import com.tools.areaspider.domain.ProxyIpAddr;
 import com.tools.areaspider.utils.RegexUtils;
+import org.jsoup.Connection;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -11,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.nio.file.Files;
@@ -19,6 +21,7 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 @RestController
@@ -26,6 +29,7 @@ public class SpiderController {
 
     // request html page retry times when request fail
     private static final int RETRY_TIMES = 5;
+    private static final Path cacheRootPath = Paths.get(System.getProperty("user.dir"), "cache");
     private static final List<String> classList = new ArrayList<String>() {{
         add("provincetr");
         add("citytr");
@@ -33,6 +37,9 @@ public class SpiderController {
         add("towntr");
         add("villagetr");
     }};
+
+    // proxy flag
+    private final static AtomicBoolean isUserProxy = new AtomicBoolean(false);
 
     /*
      * area spider startup
@@ -59,6 +66,10 @@ public class SpiderController {
 
     // 下一级地区数据加载
     private void detectChildren(Area parent, String levelClassName) {
+        if (levelClassName == classList.get(1)) {
+            System.out.println(parent.getName());
+        }
+
         try {
             List<Area> children = pageParser(parent.getUrl(), levelClassName);
             for (Area child : children) {
@@ -102,6 +113,7 @@ public class SpiderController {
     // 页面解析器
     private static List<Area> pageParser(String url, String className) throws Exception {
         Document doc = null;
+
         try {
             doc = getHtml(url, 5);
         } catch (Exception e) {
@@ -124,6 +136,7 @@ public class SpiderController {
                     area.setName(name);
 
                     area.setUrl(link.absUrl("href"));
+
                     list.add(area);
                 } catch (Exception e) {
                     System.out.println(url);
@@ -138,61 +151,90 @@ public class SpiderController {
                     code = tags.get(0).text().trim();
                     name = tags.get(2).text().trim();
                 } else {
+                    markErrorFile(url);
                     throw new Exception("document exception");
                 }
 
                 area.setCode(code);
                 area.setName(name);
+                list.add(area);
             }
         }
 
+        if (list.size() == 0) {
+            markErrorFile(url);
+        }
         return list;
+    }
+
+    private static void markErrorFile(String url) {
+        Path path = getEncodeFilePath(url);
+        if (Files.exists(path)) {
+            String name = "error-" + base64EncodeName(url);
+            path.toFile().renameTo(new File(Paths.get(cacheRootPath.toString(), name).toString()));
+        }
+    }
+
+    private static Path getEncodeFilePath(String url) {
+        return Paths.get(cacheRootPath.toString(), base64EncodeName(url));
+    }
+
+    private static String base64EncodeName(String url) {
+        return Base64.getEncoder().encodeToString(url.getBytes()) + ".html";
     }
 
     // load page html
     private static Document getHtml(String url, int retry) {
-        String base64fileName = Base64.getEncoder().encodeToString(url.getBytes());
-        String root = System.getProperty("user.dir") + "\\cache";
-        if (!Files.exists(Paths.get(root))) {
+        if (!Files.exists(cacheRootPath)) {
             try {
-                Files.createDirectories(Paths.get(root));
+                Files.createDirectories(cacheRootPath);
             } catch (IOException e) {
                 e.printStackTrace();
             }
         }
-        Path fullName = Paths.get(root, base64fileName + ".html");
+        Path fullName = getEncodeFilePath(url);
 
         Document doc = null;
 
         // 如果本地存在缓存，则从本地缓存读html
         if (Files.exists(fullName)) {
             try {
-                doc = Jsoup.parse(fullName.toFile(), CharsetManager.getCharset(base64fileName));
+                doc = Jsoup.parse(fullName.toFile(), CharsetManager.getCharset(base64EncodeName(url)));
                 doc.setBaseUri(url);
-
                 return doc;
             } catch (Exception e) {
                 e.printStackTrace();
             }
         }
 
-        ProxyIpAddr proxy = ProxyIpManager.getProxyIp();
+        ProxyIpAddr proxy = null;
         try {
-            doc = Jsoup.connect(url)
+
+            Connection conn = Jsoup.connect(url)
                     .referrer("http://www.stats.gov.cn/tjsj/tjbz/tjyqhdmhcxhfdm/")
                     .userAgent(UserAgentManager.getRandomUserAgent())
-                    .proxy(proxy.getIp(), proxy.getPort())
-                    .timeout(5000)
-                    .get();
+                    .timeout(5000);
+
+            if (isUserProxy.get()) {
+                // use proxy
+                proxy = ProxyIpManager.getProxyIp();
+                conn.proxy(proxy.getIp(), proxy.getPort());
+            }
+
+            doc = conn.get();
 
             if (doc.title().equals("访问验证")) {
+
+                // ip被屏蔽，使用代理ip策略
+                isUserProxy.compareAndSet(false, true);
+
                 ProxyIpManager.blockIp(proxy);
                 return getHtml(url, --retry);
             }
 
             // 保存到本地
             String charsetName = doc.charset().name();
-            CharsetManager.saveCharset(base64fileName, charsetName);
+            CharsetManager.saveCharset(base64EncodeName(url), charsetName);
 
             byte[] data = doc.outerHtml().getBytes(charsetName);
             Files.write(fullName, data);
@@ -200,11 +242,15 @@ public class SpiderController {
             return doc;
 
         } catch (SocketTimeoutException e) {
-            ProxyIpManager.blockIp(proxy);
+            if (proxy != null) {
+                ProxyIpManager.blockIp(proxy);
+            }
 
             e.printStackTrace();
         } catch (Exception e) {
-            ProxyIpManager.failure(proxy);
+            if (proxy != null) {
+                ProxyIpManager.failure(proxy);
+            }
 
             e.printStackTrace();
         }

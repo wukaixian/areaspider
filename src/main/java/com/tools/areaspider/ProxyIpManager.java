@@ -16,7 +16,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * random generate ip manager
+ * 代理ip地址管理
  * weight:使用一次减1，失败减2，权重范围：[0,1000]，新加入的ip权重为10
  */
 public final class ProxyIpManager {
@@ -102,9 +102,8 @@ public final class ProxyIpManager {
      * 按权重对ip地址排序,权重大的ip优先使用
      */
     private static synchronized List<ProxyIpAddr> sortedByWeight() {
-        return proxyIps.stream()
-                .sorted((a, b) -> a.getWeight() >= b.getWeight() ? 1 : 0)
-                .collect(Collectors.toList());
+        Collections.sort(proxyIps, (x, y) -> x.getWeight() > y.getWeight() ? -1 : 1);
+        return proxyIps;
     }
 
     /**
@@ -117,6 +116,7 @@ public final class ProxyIpManager {
         }
 
         ProxyIpAddr ip = sortedByWeight().get(0);
+        // 降权
         ip.decrementWeight();
 
         return ip;
@@ -157,7 +157,7 @@ public final class ProxyIpManager {
 
     /**
      * ip已被block
-    * */
+     */
     public static synchronized void blockIp(ProxyIpAddr ip) {
         if (proxyIps.contains(ip)) {
             proxyIps.remove(ip);
@@ -168,11 +168,11 @@ public final class ProxyIpManager {
 
     /**
      * 标记失败
-     * */
+     */
     public static synchronized void failure(ProxyIpAddr ip) {
         ip.failure();
 
-        if (ip.getWeight() == 0) {
+        if (ip.getWeight() <= 0) {
             if (proxyIps.contains(ip)) {
                 proxyIps.remove(ip);
             }
