@@ -13,5 +13,4 @@ public class AreaspiderApplicationTests {
 	public void contextLoads() {
 
 	}
-
 }

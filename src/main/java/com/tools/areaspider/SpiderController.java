@@ -1,6 +1,7 @@
 package com.tools.areaspider;
 
 import com.tools.areaspider.domain.Area;
+import com.tools.areaspider.domain.ProxyIpAddr;
 import com.tools.areaspider.utils.RegexUtils;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -11,6 +12,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.io.IOException;
+import java.net.SocketTimeoutException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -161,7 +163,8 @@ public class SpiderController {
         Path fullName = Paths.get(root, base64fileName + ".html");
 
         Document doc = null;
-        // 从本地缓存读html
+
+        // 如果本地存在缓存，则从本地缓存读html
         if (Files.exists(fullName)) {
             try {
                 doc = Jsoup.parse(fullName.toFile(), CharsetManager.getCharset(base64fileName));
@@ -173,11 +176,20 @@ public class SpiderController {
             }
         }
 
+        ProxyIpAddr proxy = ProxyIpManager.getProxyIp();
         try {
-            doc = Jsoup.connect(url).timeout(5000).get();
+            doc = Jsoup.connect(url)
+                    .referrer("http://www.stats.gov.cn/tjsj/tjbz/tjyqhdmhcxhfdm/")
+                    .userAgent(UserAgentManager.getRandomUserAgent())
+                    .proxy(proxy.getIp(), proxy.getPort())
+                    .timeout(5000)
+                    .get();
+
             if (doc.title().equals("访问验证")) {
-                return null;
+                ProxyIpManager.blockIp(proxy);
+                return getHtml(url, --retry);
             }
+
             // 保存到本地
             String charsetName = doc.charset().name();
             CharsetManager.saveCharset(base64fileName, charsetName);
@@ -186,9 +198,17 @@ public class SpiderController {
             Files.write(fullName, data);
 
             return doc;
+
+        } catch (SocketTimeoutException e) {
+            ProxyIpManager.blockIp(proxy);
+
+            e.printStackTrace();
         } catch (Exception e) {
+            ProxyIpManager.failure(proxy);
+
             e.printStackTrace();
         }
+
         if (retry > 0) {
             return getHtml(url, --retry);
         }
