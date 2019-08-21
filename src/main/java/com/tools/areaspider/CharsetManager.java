@@ -53,7 +53,7 @@ public final class CharsetManager {
         }
     }
 
-    // 保存编码
+    // save encoding
     public static void saveCharset(String fileName, String charsetName) {
         if (charsetMap.containsKey(fileName))
             return;
@@ -72,7 +72,7 @@ public final class CharsetManager {
         }
     }
 
-    // 查询编码
+    // query charset,default charset gb2312
     public static String getCharset(String fileName) {
         return charsetMap.containsKey(fileName) ? charsetMap.get(fileName) : "GB2312";
     }

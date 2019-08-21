@@ -2,6 +2,9 @@ package com.tools.areaspider;
 
 import com.tools.areaspider.domain.Area;
 import com.tools.areaspider.domain.ProxyIpAddr;
+import com.tools.areaspider.parser.LatestYearStatsPageParser;
+import com.tools.areaspider.parser.PageParser;
+import com.tools.areaspider.utils.Linked;
 import com.tools.areaspider.utils.RegexUtils;
 import org.jsoup.Connection;
 import org.jsoup.Jsoup;
@@ -28,15 +31,8 @@ import java.util.stream.Collectors;
 public class SpiderController {
 
     // request html page retry times when request fail
-    private static final int RETRY_TIMES = 5;
-    private static final Path cacheRootPath = Paths.get(System.getProperty("user.dir"), "cache");
-    private static final List<String> classList = new ArrayList<String>() {{
-        add("provincetr");
-        add("citytr");
-        add("countytr");
-        add("towntr");
-        add("villagetr");
-    }};
+
+    Linked<PageParser> linked = new Linked<>(new LatestYearStatsPageParser());
 
     // proxy flag
     private final static AtomicBoolean isUserProxy = new AtomicBoolean(false);
@@ -85,30 +81,6 @@ public class SpiderController {
         }
     }
 
-    // 省份解析
-    private List<Area> provinceParser(String provinceUrl, String className) {
-        Document doc = getHtml(provinceUrl, RETRY_TIMES);
-        if (doc == null) {
-            return null;
-        }
-
-
-        Elements elements = doc.getElementsByClass(className);
-
-        List<Area> provinces = new ArrayList<>();
-        for (Element element : elements) {
-            for (Element a : element.getElementsByTag("a")) {
-                String url = a.absUrl("href");
-                Area province = new Area();
-                province.setName(a.text().trim());
-                province.setUrl(url);
-
-                provinces.add(province);
-            }
-        }
-
-        return provinces;
-    }
 
     // 页面解析器
     private static List<Area> pageParser(String url, String className) throws Exception {
@@ -183,110 +155,6 @@ public class SpiderController {
         return Base64.getEncoder().encodeToString(url.getBytes()) + ".html";
     }
 
-    // load page html
-    private static Document getHtml(String url, int retry) {
-        if (!Files.exists(cacheRootPath)) {
-            try {
-                Files.createDirectories(cacheRootPath);
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
-        Path fullName = getEncodeFilePath(url);
 
-        Document doc = null;
 
-        // 如果本地存在缓存，则从本地缓存读html
-        if (Files.exists(fullName)) {
-            try {
-                doc = Jsoup.parse(fullName.toFile(), CharsetManager.getCharset(base64EncodeName(url)));
-                doc.setBaseUri(url);
-                return doc;
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
-
-        ProxyIpAddr proxy = null;
-        try {
-
-            Connection conn = Jsoup.connect(url)
-                    .referrer("http://www.stats.gov.cn/tjsj/tjbz/tjyqhdmhcxhfdm/")
-                    .userAgent(UserAgentManager.getRandomUserAgent())
-                    .timeout(5000);
-
-            if (isUserProxy.get()) {
-                // use proxy
-                proxy = ProxyIpManager.getProxyIp();
-                conn.proxy(proxy.getIp(), proxy.getPort());
-            }
-
-            doc = conn.get();
-
-            if (doc.title().equals("访问验证")) {
-
-                // ip被屏蔽，使用代理ip策略
-                isUserProxy.compareAndSet(false, true);
-
-                ProxyIpManager.blockIp(proxy);
-                return getHtml(url, --retry);
-            }
-
-            // 保存到本地
-            String charsetName = doc.charset().name();
-            CharsetManager.saveCharset(base64EncodeName(url), charsetName);
-
-            byte[] data = doc.outerHtml().getBytes(charsetName);
-            Files.write(fullName, data);
-
-            return doc;
-
-        } catch (SocketTimeoutException e) {
-            if (proxy != null) {
-                ProxyIpManager.blockIp(proxy);
-            }
-
-            e.printStackTrace();
-        } catch (Exception e) {
-            if (proxy != null) {
-                ProxyIpManager.failure(proxy);
-            }
-
-            e.printStackTrace();
-        }
-
-        if (retry > 0) {
-            return getHtml(url, --retry);
-        }
-
-        return doc;
-    }
-
-    // 最新一年统计 数据
-    public static String getLatestStatsUrl() {
-        Document doc = null;
-        try {
-            doc = getHtml("http://www.stats.gov.cn/tjsj/tjbz/tjyqhdmhcxhfdm/", 3);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-
-        List<String> urls = doc.getElementsByClass("center_list_contlist")
-                .first()
-                .getElementsByTag("a")
-                .stream()
-                .map(x -> x.attr("href"))
-                .collect(Collectors.toList());
-
-        Integer latestYear = urls.stream()
-                .map(RegexUtils::extractNumber)
-                .max(Math::max).get();
-
-        for (String url : urls) {
-            if (url.indexOf(latestYear.toString()) > -1)
-                return url;
-        }
-
-        return null;
-    }
 }
