@@ -9,6 +9,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 // html file charset manager
 public final class CharsetManager {
@@ -18,9 +19,10 @@ public final class CharsetManager {
 
     // charset map
     private static final ConcurrentMap<String, String> charsetMap = new ConcurrentHashMap<>();
+    private static AtomicBoolean initAtomic = new AtomicBoolean(false);
 
     // 加载本地文件编码
-    public static void init() {
+    private static void init() {
         if (charsetMap.size() > 0)
             return;
 
@@ -74,6 +76,10 @@ public final class CharsetManager {
 
     // query charset,default charset gb2312
     public static String getCharset(String fileName) {
+        if (initAtomic.compareAndSet(false, true)) {
+            init();
+        }
+
         return charsetMap.containsKey(fileName) ? charsetMap.get(fileName) : "GB2312";
     }
 }

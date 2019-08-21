@@ -19,11 +19,7 @@ public class Area {
 
     private List<Area> children;
 
-    @JsonIgnore
     private String url;
-
-    @JsonIgnore
-    private String className;
 
     public Area(){
         this.children=new ArrayList<>();
@@ -85,13 +81,5 @@ public class Area {
 
     public void setUrl(String url) {
         this.url = url;
-    }
-
-    public String getClassName() {
-        return className;
-    }
-
-    public void setClassName(String className) {
-        this.className = className;
     }
 }

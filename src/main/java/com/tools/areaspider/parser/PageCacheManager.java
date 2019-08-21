@@ -3,12 +3,16 @@ package com.tools.areaspider.parser;
 import com.tools.areaspider.CharsetManager;
 import com.tools.areaspider.ProxyIpManager;
 import com.tools.areaspider.UserAgentManager;
-import com.tools.areaspider.domain.ProxyIpAddr;
+import com.tools.areaspider.domain.ProxyIpAddrWrapper;
+import com.tools.areaspider.utils.ProxyNotAvailableException;
 import org.jsoup.Connection;
+import org.jsoup.HttpStatusException;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 
+import java.io.File;
 import java.io.IOException;
+import java.net.HttpRetryException;
 import java.net.SocketTimeoutException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -23,27 +27,27 @@ public final class PageCacheManager {
     private static AtomicBoolean atomicCheck = new AtomicBoolean(false);
 
     // base64 encoding
-    public static String toBase64(String url) {
+    private static String toBase64(String url) {
         return Base64.getEncoder().encodeToString(url.getBytes());
     }
 
     // url to full filename
-    public static Path urlToFilePath(String url) {
+    private static Path urlToFilePath(String url) {
         return Paths.get(cacheRootPath.toString(), urlToFileName(url));
     }
 
     // combine filename with extension
-    public static String urlToFileName(String url) {
+    private static String urlToFileName(String url) {
         return toBase64(url) + ".html";
     }
 
     // get html with default times
-    public static Document getHtml(String url) {
-        return getHtml(url, DEFAULT_RETRY_TIMES);
+    public static Document getHtml(String url, ProxyIpAddrWrapper wrapper) {
+        return getHtml(url, wrapper, DEFAULT_RETRY_TIMES);
     }
 
     // get html offline or online(local without cache file)
-    public static Document getHtml(String url, int retry) {
+    public static Document getHtml(String url, ProxyIpAddrWrapper wrapper, int retry) {
         checkCacheRootPath();
 
         Document doc = readLocalHtml(url);
@@ -51,17 +55,10 @@ public final class PageCacheManager {
             return doc;
         }
 
-        ProxyIpAddr proxy = null;
         try {
-
-            doc = getHtmlOnline(url, proxy);
+            doc = getHtmlOnline(url, wrapper);
             if (isBlockContent(doc)) {
-                if (proxy != null) {
-                    ProxyIpManager.blockIp(proxy);
-                    proxy = ProxyIpManager.getProxyIp();
-                }
-
-                return getHtml(url, --retry);
+                throw new ProxyNotAvailableException();
             }
 
             // 保存到本地
@@ -69,26 +66,27 @@ public final class PageCacheManager {
             CharsetManager.saveCharset(toBase64(url), charsetName);
 
             byte[] data = doc.outerHtml().getBytes(charsetName);
-            Files.write(fullName, data);
+            Files.write(urlToFilePath(url), data);
+        } catch (ProxyNotAvailableException | HttpStatusException
+                | HttpRetryException | SocketTimeoutException e) {
+            e.printStackTrace();
 
-            return doc;
-
-        } catch (SocketTimeoutException e) {
-            if (proxy != null) {
-                ProxyIp Manager.blockIp(proxy);
+            // switch proxy
+            if (wrapper != null) {
+                ProxyIpManager.blockIp(wrapper.getProxyIpAddr());
+                wrapper.setProxyIpAddr(ProxyIpManager.getProxyIp());
             }
 
-            e.printStackTrace();
         } catch (Exception e) {
-            if (proxy != null) {
-                ProxyIpManager.failure(proxy);
+            if (wrapper != null) {
+                ProxyIpManager.failure(wrapper.getProxyIpAddr());
             }
 
             e.printStackTrace();
         }
 
-        if (retry > 0) {
-            return getHtml(url, --retry);
+        if (doc == null) {
+            return getHtml(url, wrapper, --retry);
         }
 
         return doc;
@@ -100,23 +98,19 @@ public final class PageCacheManager {
             return true;
         }
 
-        if (doc.getElementsByTag("noscript").outerHtml().contains("请开启JavaScript")) {
-            return true;
-        }
-
-        return false;
+        return doc.getElementsByTag("noscript").outerHtml().contains("请开启JavaScript");
     }
 
     // get page online
-    private static Document getHtmlOnline(String url, ProxyIpAddr proxy) throws IOException {
+    private static Document getHtmlOnline(String url, ProxyIpAddrWrapper wrapper) throws Exception {
         Connection connection = Jsoup.connect(url)
                 .referrer("http://www.stats.gov.cn/tjsj/tjbz/tjyqhdmhcxhfdm/")
                 .userAgent(UserAgentManager.getRandomUserAgent())
-                .timeout(5000);
+                .timeout(10000); // 10s timeout
 
-        if (proxy != null) {
+        if (wrapper != null) {
             // use proxy
-            connection.proxy(proxy.getIp(), proxy.getPort());
+            connection.proxy(wrapper.getProxyIpAddr().getIp(), wrapper.getProxyIpAddr().getPort());
         }
 
         return connection.get();
@@ -152,6 +146,15 @@ public final class PageCacheManager {
             } catch (IOException e) {
                 e.printStackTrace();
             }
+        }
+    }
+
+    // mark cache error flag
+    public static void markError(String url) {
+        Path path = urlToFilePath(url);
+        if (Files.exists(path)) {
+            String name = "error-" + urlToFileName(url);
+            path.toFile().renameTo(new File(Paths.get(cacheRootPath.toString(), name).toString()));
         }
     }
 }

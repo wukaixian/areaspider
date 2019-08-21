@@ -17,12 +17,12 @@ import java.util.stream.Collectors;
 
 /**
  * 代理ip地址管理
- * weight:使用一次减1，失败减2，权重范围：[0,1000]，新加入的ip权重为10
+ * weight:使用一次减1，失败减2，权重范围：[0,100]，新加入的ip权重为10
  */
 public final class ProxyIpManager {
 
     // 请求可用ip数
-    private static final int AVAILABLE_PROXYIP_COUNT = 10;
+    private static final int AVAILABLE_PROXYIP_COUNT = 60;
 
     // ip white list path
     private static final Path proxyIpWhitelistPath = Paths.get(System.getProperty("user.dir"), "cache", "proxy_ip_whitelist.txt");

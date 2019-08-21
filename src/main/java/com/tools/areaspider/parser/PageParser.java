@@ -1,50 +1,37 @@
 package com.tools.areaspider.parser;
 
-import com.tools.areaspider.CharsetManager;
-import com.tools.areaspider.ProxyIpManager;
-import com.tools.areaspider.UserAgentManager;
 import com.tools.areaspider.domain.Area;
-import com.tools.areaspider.domain.ProxyIpAddr;
-import com.tools.areaspider.utils.RegexUtils;
-import org.jsoup.Connection;
-import org.jsoup.Jsoup;
+import com.tools.areaspider.domain.ProxyIpAddrWrapper;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
-import java.io.IOException;
-import java.net.SocketTimeoutException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 public class PageParser {
 
-
     protected final String className;
+    protected ProxyIpAddrWrapper proxyWrapper;
 
-    public PageParser(String className) {
+    public PageParser(String className, ProxyIpAddrWrapper proxy) {
         this.className = className;
+        this.proxyWrapper = proxy;
     }
 
-    public List<Area> Parser() {
-        Document doc = null;
+    public List<Area> runParser(String url) {
+        Document doc = PageCacheManager.getHtml(url, proxyWrapper);
+        if (doc == null)
+            return null;
 
-        try {
-            doc = getHtml(url, 5);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
         Elements elements = doc.getElementsByClass(className);
-
         List<Area> list = new ArrayList<>();
+
         for (Element element : elements) {
             Area area = new Area();
             String name, code;
             Elements tags = element.getElementsByTag("a");
+
             if (tags.size() > 0) {
                 try {
                     Element link = element.getElementsByTag("a").get(0);
@@ -70,8 +57,8 @@ public class PageParser {
                     code = tags.get(0).text().trim();
                     name = tags.get(2).text().trim();
                 } else {
-                    markErrorFile(url);
-                    throw new Exception("document exception");
+                    PageCacheManager.markError(url);
+                    continue;
                 }
 
                 area.setCode(code);
@@ -81,13 +68,9 @@ public class PageParser {
         }
 
         if (list.size() == 0) {
-            markErrorFile(url);
+            PageCacheManager.markError(url);
         }
+
         return list;
     }
-
-    // load page html
-
-
-
 }
